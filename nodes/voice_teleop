@@ -5,7 +5,7 @@ import math
 import argparse as ap
 
 import rospy
-from std_srvs.srv import Trigger, TriggerRequest
+from std_srvs.srv import Trigger, TriggerRequest, SetBool
 from sensor_msgs.msg import JointState
 from control_msgs.msg import FollowJointTrajectoryGoal
 from trajectory_msgs.msg import JointTrajectoryPoint
@@ -373,8 +373,8 @@ class KeyboardTeleopNode(hm.HelloNode):
 
     # Initiate kill switch on the Robot
     def initiate_hardstop(self):
-        self.trigger_stop_the_robot = rospy.ServiceProxy('/stop_the_robot', Trigger)
-        self.trigger_runstop = rospy.ServiceProxy('/runstop', Trigger)
+        self.stop_the_robot_service = rospy.ServiceProxy('/stop_the_robot', Trigger)
+        self.runstop_service = rospy.ServiceProxy('/runstop', SetBool)
 
     def main(self):
         hm.HelloNode.main(self, 'keyboard_teleop', 'keyboard_teleop', wait_for_first_pointcloud=False)
