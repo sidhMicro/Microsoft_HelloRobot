@@ -5,11 +5,12 @@ import math
 import argparse as ap
 
 import rospy
-from std_srvs.srv import Trigger, TriggerRequest
+from std_srvs.srv import Trigger, TriggerRequest, SetBool
 from sensor_msgs.msg import JointState
 from control_msgs.msg import FollowJointTrajectoryGoal
 from trajectory_msgs.msg import JointTrajectoryPoint
 from ros_msft_luis_msgs.msg import TopIntent
+from xbox_controller import XboxController
 
 import hello_helpers.hello_misc as hm
 
@@ -293,7 +294,7 @@ class GetKeyboardCommands:
 
 class KeyboardTeleopNode(hm.HelloNode):
 
-    def __init__(self, mapping_on=False, hello_world_on=False, open_drawer_on=False, clean_surface_on=False, grasp_object_on=False, deliver_object_on=False):
+    def __init__(self, mapping_on=False, hello_world_on=False, open_drawer_on=False, clean_surface_on=False, grasp_object_on=False, deliver_object_on=False, hardstop_on=False):
         hm.HelloNode.__init__(self)
         self.keys = GetKeyboardCommands(mapping_on, hello_world_on, open_drawer_on, clean_surface_on, grasp_object_on, deliver_object_on)
         self.rate = 10.0
@@ -307,6 +308,12 @@ class KeyboardTeleopNode(hm.HelloNode):
         self.grasp_object_on = grasp_object_on
         self.deliver_object_on = deliver_object_on
         self.motion = 'noMotion'
+        self.hardstop_on = hardstop_on
+        self.xbox_controller = None
+
+        if (self.hardstop_on):
+            self.xbox_controller = XboxController(print_events=False)
+
 
     def joint_states_callback(self, joint_state):
         self.joint_state = joint_state
@@ -350,6 +357,24 @@ class KeyboardTeleopNode(hm.HelloNode):
             self.trajectory_client.send_goal(trajectory_goal)
             rospy.loginfo('Done sending pose.')
      #   self.topIntent = None
+
+    # If some specific buttons are pressed on XBox controller, that would mean user is requesting for a hard stop
+    def check_for_hardstop(self):
+        hardstop_triggered = False
+        xbox_controller_state = self.xbox_controller.get_state()
+        for k in xbox_controller_state.keys():
+            if (k == "start_button_pressed" or k == "select_button_pressed" or k == "top_button_pressed" or k == "left_button_pressed" or
+                k == "bottom_button_pressed" or k == "right_button_pressed") and xbox_controller_state[k] == True:
+
+                print(k, ' : ', True)
+                hardstop_triggered = True
+
+        return hardstop_triggered
+
+    # Initiate kill switch on the Robot
+    def initiate_hardstop(self):
+        self.stop_the_robot_service = rospy.ServiceProxy('/stop_the_robot', Trigger)
+        self.runstop_service = rospy.ServiceProxy('/runstop', SetBool)
 
     def main(self):
         hm.HelloNode.main(self, 'keyboard_teleop', 'keyboard_teleop', wait_for_first_pointcloud=False)
@@ -415,12 +440,26 @@ class KeyboardTeleopNode(hm.HelloNode):
             rospy.loginfo('Node ' + self.node_name + ' connected to /deliver_object/trigger_deliver_object.')
             self.trigger_deliver_object_service = rospy.ServiceProxy('/deliver_object/trigger_deliver_object', Trigger)
 
+        # Start xbox controller tracking
+        if self.hardstop_on:
+            self.xbox_controller.start()
+
         rospy.Subscriber('/stretch/joint_states', JointState, self.joint_states_callback)
         rospy.Subscriber('/intent', TopIntent, self.intent_callback)
 
         rate = rospy.Rate(self.rate)
 
         while not rospy.is_shutdown():
+            hardstop_triggered = False
+            # Check if hard stop is requested
+            if self.hardstop_on:
+                hardstop_triggered = self.check_for_hardstop()
+            
+            # If hard stop is requested, initiate the kill switch
+            if (hardstop_triggered):
+                self.initiate_hardstop()
+            #    break
+
             command = self.keys.get_command(self)
             print(command)
             if command != None:
@@ -438,6 +477,7 @@ if __name__ == '__main__':
         parser.add_argument('--clean_surface_on', action='store_true', help='Enable Clean Surface trigger, which requires connection to the appropriate clean_surface service.')
         parser.add_argument('--grasp_object_on', action='store_true', help='Enable Grasp Object trigger, which requires connection to the appropriate grasp_object service.')
         parser.add_argument('--deliver_object_on', action='store_true', help='Enable Deliver Object trigger, which requires connection to the appropriate deliver_object service.')
+        parser.add_argument('--hardstop_on', action='store_true', help='Enable setting hard stop via XBox controller.')
 
         args, unknown = parser.parse_known_args()
         mapping_on = args.mapping_on
@@ -446,8 +486,9 @@ if __name__ == '__main__':
         clean_surface_on = args.clean_surface_on
         grasp_object_on = args.grasp_object_on
         deliver_object_on = args.deliver_object_on
+        hardstop_on = args.hardstop_on
 
-        node = KeyboardTeleopNode(mapping_on, hello_world_on, open_drawer_on, clean_surface_on, grasp_object_on, deliver_object_on)
+        node = KeyboardTeleopNode(mapping_on, hello_world_on, open_drawer_on, clean_surface_on, grasp_object_on, deliver_object_on, hardstop_on)
         node.main()
     except KeyboardInterrupt:
         rospy.loginfo('interrupt received, so shutting down')
